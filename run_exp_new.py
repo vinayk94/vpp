@@ -1,4 +1,3 @@
-# run_experiments.py 
 import asyncio
 import pandas as pd
 import numpy as np
@@ -25,7 +24,7 @@ async def run_scenarios(vpp, scale_factor):
         events = []
 
         # Simulate events
-        for i in range(100):
+        for i in range(10):  # Reduced to 10 for quicker debugging
             priority = np.random.choice(list(EventPriority))
             event = Event(
                 id=f"{scenario}_{i}",
@@ -42,7 +41,7 @@ async def run_scenarios(vpp, scale_factor):
                           f"resource requirement: {event.resource_requirement:.2f}, duration: {event.duration}")
 
         # Allow processing to happen
-        await asyncio.sleep(5)
+        await asyncio.sleep(10)  # Allow enough time for processing
 
         # Check completed events
         completed_event_ids = [e.id for e in events if e.id in vpp.completed_event_ids]
@@ -80,6 +79,9 @@ async def main():
     for scale_factor in [1, 10]:
         logging.info(f"Starting experiments with scale factor {scale_factor}")
         vpp = VPPSystem(scale_factor)
+
+        # Start processing loop
+        asyncio.create_task(vpp.process_events_loop())
 
         scenario_results = await run_scenarios(vpp, scale_factor)
         results.extend(scenario_results)
