@@ -1,0 +1,14 @@
+# Ignore the virtual environment
+venv/
+
+# Ignore the results folder
+results/
+
+# Optional: Ignore OS-generated files
+.DS_Store
+Thumbs.db
+
+# Optional: Ignore Python cache files
+__pycache__/
+*.pyc
+*.pyo
