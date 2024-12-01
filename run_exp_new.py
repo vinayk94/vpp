@@ -24,14 +24,14 @@ async def run_scenarios(vpp, scale_factor):
         events = []
 
         # Simulate events
-        for i in range(10):  # Reduced to 10 for quicker debugging
+        for i in range(100):  # Increase event count for stress testing
             priority = np.random.choice(list(EventPriority))
             event = Event(
                 id=f"{scenario}_{i}",
                 priority=priority,
                 timestamp=datetime.now(),
                 deadline=datetime.now() + timedelta(seconds=10),
-                resource_requirement=np.random.uniform(50, 200),
+                resource_requirement=np.random.uniform(50, 500),  # Increase resource requirements
                 duration=np.random.randint(1, 10),
                 event_type=scenario
             )
@@ -41,7 +41,7 @@ async def run_scenarios(vpp, scale_factor):
                           f"resource requirement: {event.resource_requirement:.2f}, duration: {event.duration}")
 
         # Allow processing to happen
-        await asyncio.sleep(10)  # Allow enough time for processing
+        await asyncio.sleep(30)  # Allow sufficient time for processing
 
         # Check completed events
         completed_event_ids = [e.id for e in events if e.id in vpp.completed_event_ids]
@@ -54,13 +54,16 @@ async def run_scenarios(vpp, scale_factor):
             if vpp.performance_metrics['resource_utilization']
             else 0.0
         )
-        avg_response_time = (
-            np.mean(vpp.performance_metrics['response_times'])
-            if vpp.performance_metrics['response_times']
-            else 0.0
-        )
+        avg_response_time_by_priority = {
+            priority.name: (
+                np.mean(vpp.performance_metrics['response_times'][priority])
+                if vpp.performance_metrics['response_times'][priority]
+                else 0.0
+            )
+            for priority in EventPriority
+        }
         logging.info(f"Average resource utilization: {utilization:.2%}")
-        logging.info(f"Average response time: {avg_response_time:.2f}s")
+        logging.info(f"Average response time by priority: {avg_response_time_by_priority}")
 
         # Append results
         results.append({
@@ -69,7 +72,7 @@ async def run_scenarios(vpp, scale_factor):
             "total_events": len(events),
             "completed_events": completed_count,
             "utilization": utilization,
-            "avg_response_time": avg_response_time,
+            "avg_response_time_by_priority": avg_response_time_by_priority,
         })
 
     return results

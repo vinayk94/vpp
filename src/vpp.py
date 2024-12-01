@@ -43,7 +43,7 @@ class VPPSystem:
         }
         self.scaling_factor = scaling_factor
         self.performance_metrics = {
-            'response_times': [],
+            'response_times': {p: [] for p in EventPriority},
             'resource_utilization': [],
             'success_rates': {p: [] for p in EventPriority},
             'processing_times': [],
@@ -57,8 +57,8 @@ class VPPSystem:
         for i in range(10 * scaling_factor):
             der = DER(
                 id=f"der_{i}",
-                capacity=1000.0,
-                available_capacity=1000.0,
+                capacity=500.0,  # Reduced capacity to simulate contention
+                available_capacity=500.0,
                 status="online",
                 location=f"location_{i}"
             )
@@ -196,7 +196,7 @@ class VPPSystem:
     def _record_metrics(self, event: Event, success: bool, start_time: datetime):
         """Record performance metrics for an event."""
         response_time = (datetime.now() - start_time).total_seconds()
-        self.performance_metrics['response_times'].append(response_time)
+        self.performance_metrics['response_times'][event.priority].append(response_time)
         self.performance_metrics['success_rates'][event.priority].append(success)
 
         total_capacity = sum(der.capacity for der in self.ders.values())
