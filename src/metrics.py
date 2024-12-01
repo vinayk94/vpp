@@ -1,188 +1,97 @@
-# src/metrics.py
-
-import pandas as pd
 import numpy as np
-from datetime import datetime
-from typing import List, Dict, Optional
-from .vpp import Event, EventPriority
+from typing import List, Dict
+from .vpp import Event, DER, DERState
 
 class VPPMetricsCollector:
-    def __init__(self):
+    def __init__(self, ders: Dict[str, DER]):
+        self.ders = ders
         self.metrics_store = {
-            'response_times': [],            # List of response times for each event
-            'success_rates': {},             # Success rate by priority
-            'resource_utilization': [],      # Resource utilization over time
-            'priority_satisfaction': {},      # How well priorities were respected
-            'event_latency': {},             # Event processing latency by type
-            'resource_contention': [],       # Times when resources were contested
-            'failed_events': [],             # Events that couldn't be processed
-            'completed_events': []           # Successfully processed events
+            "response_times": [],
+            "resource_utilization": [],
+            "failed_events": 0,  # Total count of failed events
+            "successful_events": [],  # List of successful event IDs
+            "depleted_ders": [],
+            "offline_ders": [],
+            "priority_success_rates": {},
+            "fleet_metrics": []
         }
 
-    async def collect_scenario_metrics(self, events: List[Event]) -> Dict:
-        """Collect comprehensive metrics for a test scenario"""
-        metrics = {
-            'event_processing': self._calculate_event_metrics(events),
-            'resource_usage': self._calculate_resource_metrics(),
-            'system_performance': self._calculate_system_metrics(events)
-        }
-        
-        self._update_metrics_store(metrics)
-        return metrics
+    def collect_event_metrics(self, events: List[Event], completed_event_ids: List[str]):
+        """Collect metrics based on event outcomes."""
+        total_events = len(events)
+        successful_events = [e.id for e in events if e.id in completed_event_ids]
+        failed_events = total_events - len(successful_events)
 
-    def _calculate_response_time(self, event: Event) -> float:
-        """Calculate response time for a single event"""
-        processing_time = (datetime.now() - event.timestamp).total_seconds()
-        self.metrics_store['response_times'].append(processing_time)
-        return processing_time
+        # Increment failed events count
+        self.metrics_store["failed_events"] += failed_events
+        # Add successful event IDs
+        self.metrics_store["successful_events"].extend(successful_events)
 
-    def _calculate_success_rate(self, events: List[Event]) -> float:
-        """Calculate success rate for a set of events"""
-        completed = len([e for e in events if e.id in [ce.id for ce in self.metrics_store['completed_events']]])
-        total = len(events)
-        success_rate = completed / max(1, total)
-        
-        # Store by priority
-        if events and events[0].priority:
-            self.metrics_store['success_rates'][events[0].priority.name] = success_rate
-        
-        return success_rate
-
-    def _calculate_contention_rate(self) -> float:
-        """Calculate resource contention rate"""
-        if not self.metrics_store['resource_utilization']:
-            return 0.0
-            
-        # Consider contention when utilization is above 80%
-        contention_points = len([u for u in self.metrics_store['resource_utilization'] if u > 0.8])
-        return contention_points / len(self.metrics_store['resource_utilization'])
-
-    def _calculate_resource_efficiency(self) -> float:
-        """Calculate resource utilization efficiency"""
-        if not self.metrics_store['resource_utilization']:
-            return 0.0
-            
-        # Calculate weighted average giving more weight to recent utilization
-        weights = np.linspace(0.5, 1.0, len(self.metrics_store['resource_utilization']))
-        weighted_util = np.average(
-            self.metrics_store['resource_utilization'],
-            weights=weights
-        )
-        return weighted_util
-
-    def _calculate_priority_satisfaction(self, events: List[Event]) -> Dict:
-        """Calculate how well priority order was maintained"""
-        priority_metrics = {}
-        for priority in EventPriority:
+        # Success rate by priority
+        priorities = set(e.priority for e in events)
+        for priority in priorities:
             priority_events = [e for e in events if e.priority == priority]
-            if priority_events:
-                # Calculate average response time relative to deadline
-                avg_deadline_ratio = np.mean([
-                    self._calculate_response_time(e) / max(1, (e.deadline - e.timestamp).total_seconds())
-                    for e in priority_events
-                ])
-                priority_metrics[priority.name] = min(1.0, 1.0 / max(0.001, avg_deadline_ratio))
-                
-        self.metrics_store['priority_satisfaction'].update(priority_metrics)
-        return priority_metrics
+            success_count = len([e for e in priority_events if e.id in completed_event_ids])
+            self.metrics_store["priority_success_rates"][priority] = success_count / len(priority_events) if priority_events else 0
 
-    def _calculate_stability_score(self) -> float:
-        """Calculate overall system stability score"""
-        if not self.metrics_store['response_times']:
-            return 1.0
-            
-        # Factors affecting stability
-        response_time_consistency = 1.0 - np.std(self.metrics_store['response_times']) / max(1, np.mean(self.metrics_store['response_times']))
-        resource_stability = 1.0 - np.std(self.metrics_store['resource_utilization']) if self.metrics_store['resource_utilization'] else 1.0
-        success_rate = np.mean(list(self.metrics_store['success_rates'].values())) if self.metrics_store['success_rates'] else 1.0
-        
-        # Weighted stability score
-        stability = (
-            0.4 * response_time_consistency +
-            0.3 * resource_stability +
-            0.3 * success_rate
-        )
-        
-        return max(0.0, min(1.0, stability))
-
-    def _calculate_event_metrics(self, events: List[Event]) -> Dict:
-        """Calculate event-specific metrics"""
-        metrics = {
-            'total_events': len(events),
-            'events_by_priority': {},
-            'avg_response_time': {},
-            'success_rate': {},
-        }
-        
-        for priority in EventPriority:
-            priority_events = [e for e in events if e.priority == priority]
-            if priority_events:
-                metrics['events_by_priority'][priority.name] = len(priority_events)
-                metrics['avg_response_time'][priority.name] = np.mean(
-                    [self._calculate_response_time(e) for e in priority_events]
-                )
-                metrics['success_rate'][priority.name] = self._calculate_success_rate(priority_events)
-        
-        return metrics
-
-    def _calculate_resource_metrics(self) -> Dict:
-        """Calculate resource utilization metrics"""
         return {
-            'avg_utilization': np.mean(self.metrics_store['resource_utilization']) if self.metrics_store['resource_utilization'] else 0.0,
-            'peak_utilization': np.max(self.metrics_store['resource_utilization']) if self.metrics_store['resource_utilization'] else 0.0,
-            'contention_rate': self._calculate_contention_rate(),
-            'resource_efficiency': self._calculate_resource_efficiency()
+            "total_events": total_events,
+            "successful_events": len(successful_events),
+            "failed_events": failed_events,
+            "priority_success_rates": self.metrics_store["priority_success_rates"]
         }
 
-    def _calculate_system_metrics(self, events: List[Event]) -> Dict:
-        """Calculate overall system performance metrics"""
-        if not events:
-            return {
-                'throughput': 0.0,
-                'avg_latency': 0.0,
-                'priority_satisfaction': {},
-                'system_stability': 1.0
+    def collect_der_metrics(self):
+        """Collect metrics for DER states."""
+        total_ders = len(self.ders)
+        depleted_ders = len([d for d in self.ders.values() if d.state == DERState.DEPLETED])
+        offline_ders = len([d for d in self.ders.values() if d.state == DERState.OFFLINE])
+        available_ders = total_ders - depleted_ders - offline_ders
+
+        utilization = np.mean(
+            [d.capacity - d.available_capacity for d in self.ders.values() if d.state == DERState.AVAILABLE]
+        ) / max(1, np.mean([d.capacity for d in self.ders.values()]))
+
+        self.metrics_store["depleted_ders"].append(depleted_ders)
+        self.metrics_store["offline_ders"].append(offline_ders)
+        self.metrics_store["resource_utilization"].append(utilization)
+
+        return {
+            "total_ders": total_ders,
+            "available_ders": available_ders,
+            "depleted_ders": depleted_ders,
+            "offline_ders": offline_ders,
+            "resource_utilization": utilization
+        }
+
+    def collect_fleet_metrics(self):
+        """Collect fleet-level metrics."""
+        total_capacity = sum(der.capacity for der in self.ders.values())
+        total_available = sum(der.available_capacity for der in self.ders.values() if der.state != DERState.OFFLINE)
+        utilization = total_available / total_capacity if total_capacity > 0 else 0
+
+        fleet_metrics = {
+            "total_fleet_capacity": total_capacity,
+            "total_available_capacity": total_available,
+            "fleet_utilization": utilization,
+        }
+
+        self.metrics_store["fleet_metrics"].append(fleet_metrics)
+        return fleet_metrics
+
+    def generate_report(self) -> Dict:
+        """Generate a comprehensive performance report."""
+        return {
+            "response_time_mean": np.mean(self.metrics_store["response_times"]) if self.metrics_store["response_times"] else 0,
+            "resource_utilization_mean": np.mean(self.metrics_store["resource_utilization"]),
+            "total_failed_events": self.metrics_store["failed_events"],
+            "total_successful_events": len(self.metrics_store["successful_events"]),
+            "average_depleted_ders": np.mean(self.metrics_store["depleted_ders"]) if self.metrics_store["depleted_ders"] else 0,
+            "average_offline_ders": np.mean(self.metrics_store["offline_ders"]) if self.metrics_store["offline_ders"] else 0,
+            "priority_success_rates": self.metrics_store["priority_success_rates"],
+            "fleet_metrics_summary": {
+                "fleet_utilization_mean": np.mean([f["fleet_utilization"] for f in self.metrics_store["fleet_metrics"]]) if self.metrics_store["fleet_metrics"] else 0,
+                "total_fleet_capacity": self.metrics_store["fleet_metrics"][-1]["total_fleet_capacity"] if self.metrics_store["fleet_metrics"] else 0,
+                "total_available_capacity": self.metrics_store["fleet_metrics"][-1]["total_available_capacity"] if self.metrics_store["fleet_metrics"] else 0,
             }
-            
-        return {
-            'throughput': len(events) / max(1, (max(e.timestamp for e in events) - 
-                                              min(e.timestamp for e in events)).total_seconds()),
-            'avg_latency': np.mean(list(self.metrics_store['event_latency'].values())) if self.metrics_store['event_latency'] else 0.0,
-            'priority_satisfaction': self._calculate_priority_satisfaction(events),
-            'system_stability': self._calculate_stability_score()
         }
-
-    def _update_metrics_store(self, metrics: Dict):
-        """Update internal metrics store with new metrics"""
-        for category, values in metrics.items():
-            if isinstance(values, dict):
-                for metric, value in values.items():
-                    if metric not in self.metrics_store:
-                        self.metrics_store[metric] = []
-                    if isinstance(value, (int, float)):
-                        self.metrics_store[metric].append(value)
-            elif isinstance(values, (int, float)):
-                if category not in self.metrics_store:
-                    self.metrics_store[category] = []
-                self.metrics_store[category].append(values)
-
-    def generate_report(self) -> pd.DataFrame:
-        """Generate a comprehensive performance report"""
-        report_data = {
-            'metric': [],
-            'value': [],
-            'std_dev': []
-        }
-        
-        for metric, values in self.metrics_store.items():
-            if isinstance(values, list) and values:
-                report_data['metric'].append(metric)
-                report_data['value'].append(np.mean(values))
-                report_data['std_dev'].append(np.std(values))
-            elif isinstance(values, dict) and values:
-                for sub_metric, sub_values in values.items():
-                    report_data['metric'].append(f"{metric}_{sub_metric}")
-                    report_data['value'].append(np.mean(sub_values) if isinstance(sub_values, list) else sub_values)
-                    report_data['std_dev'].append(np.std(sub_values) if isinstance(sub_values, list) else 0)
-                    
-        return pd.DataFrame(report_data)
